@@ -1,10 +1,10 @@
-'use client';
-
 import React, { useState } from 'react';
-import { Upload, Button, message, Select, Avatar, Spin } from 'antd';
+import { Upload, Button, message, Select, Image, Row, Col } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import '../../styles/cars.css';
-import { addCar } from '../../api/cars';
+import { addCar, uploadImage } from '../../api/cars'; // Assume addCar handles sending the form data
+
+const { Dragger } = Upload; // Using the Drag and Drop upload component
 
 const AddCarPage = () => {
   const [formData, setFormData] = useState({
@@ -13,34 +13,20 @@ const AddCarPage = () => {
     phone: '',
     city: '',
     numOfCopy: '',
-    carImage: '',
+    carImages: [], // Storing multiple image URLs
   });
   const [error, setError] = useState('');
   const [messageState, setMessageState] = useState('');
-  const [file, setFile] = useState(null);
-  const [imageUrl, setImageUrl] = useState(null); // Store image URL for preview
+  const [imageUrls, setImageUrls] = useState([]); // Storing image preview URLs
   const [loading, setLoading] = useState(false);
+  const [fileList, setFileList] = useState([]); // Store the file list
+  const handleFileChange = ({ fileList: newFileList }) => {
+    setFileList(newFileList);
 
-  const handleImageChange = (info) => {
-    if (info.file.status === 'uploading') {
-      setLoading(true);
-    } else if (info.file.status === 'done') {
-      setFile(info.file.originFileObj); // Store the selected file temporarily
-      setLoading(false);
-      message.success(`${info.file.name} file selected successfully`);
-    } else if (info.file.status === 'error') {
-      setLoading(false);
-      message.error(`${info.file.name} file upload failed.`);
-    }
-  };
-
-  // Image preview function
-  const handlePreview = (file) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImageUrl(reader.result); // Set the local image preview
-    };
-    reader.readAsDataURL(file); // Read file as base64 URL
+    const previewUrls = newFileList.map((file) =>
+      URL.createObjectURL(file.originFileObj)
+    );
+    setImageUrls(previewUrls);
   };
 
   const handleSubmit = async (e) => {
@@ -48,7 +34,6 @@ const AddCarPage = () => {
     setError('');
     setMessageState('');
 
-    // Validation for missing fields (image is now optional)
     if (
       !formData.carModel ||
       !formData.price ||
@@ -56,46 +41,62 @@ const AddCarPage = () => {
       !formData.city ||
       !formData.numOfCopy
     ) {
-      setError('All fields are required, excluding the car image.');
+      setError('All fields are required, excluding the car images.');
       return;
     }
 
+    if (fileList.length === 0) {
+      setError('Please upload at least one image.');
+      return;
+    }
+
+    setLoading(true);
+
     try {
-      // If there's a file, include it
-      let uploadedImageUrl = imageUrl;
-
-      // Add the car data with the image URL
-      const formDataWithImage = { ...formData, carImage: uploadedImageUrl };
-
-      // Send car data to the backend via addCar
-      const result = await addCar(formDataWithImage);
-
-      setMessageState('Car added successfully!');
+      const uploadedImageUrls = await Promise.all(
+        fileList.map((file) => uploadImage(file.originFileObj)) // Assuming uploadImage accepts a file and returns a URL
+      );
+      const finalFormData = {
+        ...formData,
+        carImages: uploadedImageUrls,
+      };
+      const result = await addCar(finalFormData);
+      if (result.success) {
+        setMessageState('Car added successfully!');
+        setFormData({
+          carModel: '',
+          price: '',
+          phone: '',
+          city: '',
+          numOfCopy: '',
+          carImages: [],
+        });
+        setFileList([]);
+        setImageUrls([]);
+      }
+    } catch (error) {
+      setError(error.message || 'An error occurred while adding the car');
+    } finally {
+      setLoading(false);
+      setFileList([]);
+      setImageUrls([]);
       setFormData({
         carModel: '',
         price: '',
         phone: '',
         city: '',
         numOfCopy: '',
-        carImage: '',
+        carImages: [],
       });
-      setFile(null); // Clear the file after submission
-      setImageUrl(null); // Clear the image URL after submission
-    } catch (error) {
-      setError(error.message || 'An error occurred while adding the car');
     }
   };
 
   return (
     <div className="add-car-page">
       <h1>Add a New Car</h1>
-
-      {/* Display success or error messages */}
       {error && <p className="error">{error}</p>}
       {messageState && <p className="success">{messageState}</p>}
-
       <form onSubmit={handleSubmit}>
-        {/* Car Model */}
         <div className="form-group">
           <label htmlFor="carModel">Car Model</label>
           <input
@@ -110,7 +111,6 @@ const AddCarPage = () => {
           />
         </div>
 
-        {/* Price */}
         <div className="form-group">
           <label htmlFor="price">Price</label>
           <input
@@ -125,7 +125,6 @@ const AddCarPage = () => {
           />
         </div>
 
-        {/* Phone */}
         <div className="form-group">
           <label htmlFor="phone">Phone</label>
           <input
@@ -139,8 +138,6 @@ const AddCarPage = () => {
             required
           />
         </div>
-
-        {/* City */}
         <div className="form-group">
           <label htmlFor="city">City</label>
           <Select
@@ -155,7 +152,6 @@ const AddCarPage = () => {
           </Select>
         </div>
 
-        {/* Number of Copies */}
         <div className="form-group">
           <label htmlFor="numOfCopy">Number of Copies</label>
           <Select
@@ -166,57 +162,39 @@ const AddCarPage = () => {
             placeholder="Select number of copies"
           >
             {[...Array(10).keys()].map((num) => (
-              <Select.Option key={num} value={String(num + 1)}>
+              <Select.Option key={num} value={num + 1}>
                 {num + 1}
               </Select.Option>
             ))}
           </Select>
         </div>
-
-        {/* Car Image Upload */}
-        <div className="profileImage">
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-            }}
+        <div className="form-group">
+          <label htmlFor="carImages">Car Images</label>
+          <Dragger
+            accept="image/*"
+            multiple={true}
+            fileList={fileList}
+            showUploadList={false}
+            onChange={handleFileChange}
+            beforeUpload={() => false} // Prevent default upload action
           >
-            <Avatar
-              src={imageUrl}
-              alt="Car Image"
-              style={{
-                width: 140,
-                height: 140,
-                marginTop: 10,
-                marginBottom: 10,
-              }}
-            />
-            <Upload
-              name="file"
-              accept="image/*"
-              showUploadList={false}
-              beforeUpload={(file) => {
-                handlePreview(file); // Preview image without uploading
-                return false; // Prevent automatic upload
-              }}
-            >
-              <Spin spinning={loading} size="large">
-                <Button
-                  icon={<UploadOutlined />}
-                  type="primary"
-                  className="w-full"
-                  style={{ display: loading ? 'none' : 'block' }}
-                >
-                  Upload Car Image (Optional)
-                </Button>
-              </Spin>
-            </Upload>
-          </div>
+            <div className="upload-box">
+              <p className="upload-text">
+                Drag and drop images here, or click to select files
+              </p>
+            </div>
+          </Dragger>
+          <Row gutter={16} className="preview-images">
+            {imageUrls.map((url, index) => (
+              <Col key={index} span={8}>
+                <Image src={url} alt={`car-image-${index}`} />
+              </Col>
+            ))}
+          </Row>
         </div>
-
-        {/* Submit */}
-        <button type="submit">Add Car</button>
+        <button type="submit" htmlType="submit" loading={loading}>
+          Add Car
+        </button>
       </form>
     </div>
   );
